@@ -34,8 +34,8 @@
   // DEFAULTS
   /////////////////////////////////////////////////////////////////////////////
 
-  var MIN_WIDTH = 32;
-  var MIN_HEIGHT = 32;
+  var MIN_WIDTH = 64;
+  var MIN_HEIGHT = 64;
 
   var TIMEOUT_SAVE = 500;
   var TIMEOUT_RESIZE = 50;
@@ -67,19 +67,26 @@
   function bindWidgetEvents(instance) {
     var timeout = null;
     var position = instance._getNormalizedPosition();
-    var dimension = {w: instance._options.width, h: instance._options.height};
+    var dimension = instance._getDimension();
     var start = {x: 0, y: 0};
 
-    function _bindWindow(action) {
+    function _mouseDown(ev, pos, action) {
+      ev.preventDefault();
+
+      timeout = clearTimeout(timeout);
+      start = pos;
+      position = instance._getNormalizedPosition();
+      dimension = instance._getDimension();
+
       Utils.$bind(window, 'mousemove:modifywidget', function(ev, pos) {
         var dx = pos.x - start.x;
         var dy = pos.y - start.y;
         var obj = action === 'move' ? {
-          x: position.x + dx,
-          y: position.y + dy
+          left: position.left + dx,
+          top: position.top + dy
         } : {
-          w: instance._options.aspect ? (dimension.w + dx) : dimension.w + dx,
-          h: instance._options.aspect ? (dimension.w + dx) : dimension.h + dy
+          width: instance._options.aspect ? (dimension.width + dx) : dimension.width + dx,
+          height: instance._options.aspect ? (dimension.height + dx) : dimension.height + dy
         };
 
         instance._onMouseMove(ev, obj, action);
@@ -91,20 +98,9 @@
 
         instance._onMouseUp(ev, pos, action);
       });
-    }
-
-    function _mouseDown(ev, pos, action) {
-      ev.preventDefault();
-
-      timeout = clearTimeout(timeout);
-      start = pos;
-      position = instance._getNormalizedPosition();
-      dimension = {w: instance._options.width, h: instance._options.height};
 
       instance._windowWidth = window.innerWidth;
       instance._windowHeight = window.innerHeight;
-
-      _bindWindow(action);
       instance._onMouseDown(ev, pos, action);
     }
 
@@ -157,24 +153,31 @@
       }
     }
 
-    var s = settings.get();
-    Object.keys(s).forEach(function(k) {
-      options[k] = s[k];
-    });
+    this._position = {
+      left: settings.get('left', options.left),
+      top: settings.get('top', options.top),
+      right: settings.get('right', options.right),
+      bottom: settings.get('bottom', options.bottom)
+    };
+
+    this._dimension = {
+      height: settings.get('height', options.height),
+      width: settings.get('width', options.width)
+    };
 
     this._name = name;
     this._settings = settings;
     this._options = options;
-    this._$element = null;
-    this._$resize = null;
-    this._$canvas = null;
-    this._$context = null
     this._isManipulating = false;
-    this._resizeTimeout = null;
     this._windowWidth = window.innerWidth;
     this._windowHeight = window.innerHeight;
     this._requestId = null;
     this._saveTimeout = null;
+
+    this._$element = null;
+    this._$resize = null;
+    this._$canvas = null;
+    this._$context = null
 
     console.debug('Widget::construct()', this._name, this._settings.get());
   }
@@ -194,8 +197,8 @@
 
     if ( this._options.canvas ) {
       this._$canvas = document.createElement('canvas');
-      this._$canvas.width = (this._options.width || MIN_WIDTH);
-      this._$canvas.height = (this._options.height || MIN_HEIGHT);
+      this._$canvas.width = (this._dimension.width || MIN_WIDTH);
+      this._$canvas.height = (this._dimension.height || MIN_HEIGHT);
 
       if ( this._options.viewBox ) {
         this._$canvas.setAttribute('viewBox', this._options.viewBox);
@@ -223,7 +226,7 @@
     var self = this;
 
     this.onInited();
-    this.onResize();
+    this.onResize(this._dimension);
 
     var fpsInterval, startTime, now, then, elapsed;
 
@@ -264,7 +267,6 @@
     Utils.$unbind(this._$element, 'mouseover:showenvelope');
     Utils.$unbind(this._$element, 'mouseout:hideenvelope');
 
-    this._resizeTimeout = clearTimeout(this._resizeTimeout);
     this._saveTimeout = clearTimeout(this._saveTimeout);
 
     if ( this._requestId ) {
@@ -283,6 +285,13 @@
    */
   Widget.prototype._onMouseDown = function(ev, pos, action) {
     Utils.$addClass(this._$element, 'corewm-widget-active');
+
+    // This temporarily sets the position to a normalized one
+    // to prevent resizing going in wrong direction
+    if ( action === 'resize' ) {
+      var obj = this._getNormalizedPosition();
+      this._setPosition(obj);
+    }
   };
 
   /**
@@ -292,37 +301,13 @@
     var self = this;
 
     this._isManipulating = true;
-    this._resizeTimeout = clearTimeout(this._resizeTimeout);
 
     if ( action === 'move' ) {
-      this._updatePosition(obj);
-
-      // Convert left to right position if we passed half the screen
-      var hleft = this._windowWidth / 2;
-      var htop = this._windowHeight / 2;
-      var aleft = this._options.left + (this._options.width / 2);
-      var atop = this._options.top + (this._options.height / 2);
-
-      if ( aleft >= hleft ) {
-        var right = this._windowWidth - (this._options.left + this._options.width);
-        this._options.left = null;
-        this._options.right = right;
-      }
-
-      if ( atop >= htop ) {
-        var bottom = this._windowHeight - (this._options.top + this._options.height);
-        this._options.top = null;
-        this._options.bottom = bottom;
-      }
+      this._setPosition(obj, true);
+      this.onMove(this._position);
     } else {
-      this._options.width = obj.w;
-      this._options.height = obj.h;
-
-      this._updateDimension();
-
-      this._resizeTimeout = setTimeout(function() {
-        self.onResize();
-      }, TIMEOUT_RESIZE);
+      this._setDimension(obj);
+      this.onResize(this._dimension);
     }
   };
 
@@ -339,6 +324,12 @@
 
     this._hideEnvelope();
 
+    // This resets the position back to an absolute one
+    // after it was temporarily set in onMouseDown
+    if ( action === 'resize' ) {
+      this._setPosition(null, true);
+    }
+
     this._saveTimeout = clearTimeout(this._saveTimeout);
     this._saveTimeout = setTimeout(function() {
       self._saveOptions();
@@ -350,21 +341,13 @@
    */
   Widget.prototype._saveOptions = function() {
     var opts = {
-      width: this._options.width,
-      height: this._options.height
+      width: this._dimension.width,
+      height: this._dimension.height,
+      left: this._position.left,
+      top: this._position.top,
+      right: this._position.right,
+      bottom: this._position.bottom
     };
-
-    if ( this._options.right ) {
-      opts.right = this._options.right;
-    } else {
-      opts.left = this._options.left;
-    }
-
-    if ( this._options.bottom ) {
-      opts.bottom = this._options.bottom;
-    } else {
-      opts.top = this._options.top;
-    }
 
     this._settings.set(null, opts, true);
   };
@@ -390,20 +373,65 @@
   };
 
   /**
-   * Updates the Widgets position based on internal options
+   * Sets the position and correctly aligns it to the DOM (sticking)
    */
-  Widget.prototype._updatePosition = function(obj) {
-    if ( this._$element ) {
-      var p = obj || this._getNormalizedPosition();
-      this._$element.style.left = String(p.x) + 'px';
-      this._$element.style.top = String(p.y) + 'px';
+  Widget.prototype._setPosition = function(obj, stick) {
+    obj = obj || Utils.cloneObject(this._position);
+
+    this._position.top = obj.top;
+    this._position.left = obj.left;
+    this._position.bottom = null;
+    this._position.right = null;
+
+    if ( stick ) {
+      if ( this._isPastHalf('vertical', obj) ) {
+        this._position.top = null;
+        this._position.bottom = this._windowHeight - this._dimension.height - obj.top;
+      }
+
+      if ( this._isPastHalf('horizontal', obj) ) {
+        this._position.left = null;
+        this._position.right = this._windowWidth - this._dimension.width - obj.left;
+      }
     }
 
-    if ( obj ) {
-      this._options.right = null;
-      this._options.bottom = null;
-      this._options.left = obj.x;
-      this._options.top = obj.y;
+    this._updatePosition();
+  };
+
+  /**
+   * Sets the dimension of the widget
+   */
+  Widget.prototype._setDimension = function(obj) {
+    var o = this._options;
+    var w = Math.min(Math.max(obj.width, o.minWidth), o.maxWidth);
+    var h = Math.min(Math.max(obj.height, o.minHeight), o.maxHeight);
+
+    this._dimension.width = w;
+    this._dimension.height = h;
+
+    this._updateDimension();
+  };
+
+  /**
+   * Updates the Widgets position based on internal options
+   */
+  Widget.prototype._updatePosition = function() {
+    if ( this._$element ) {
+      if ( this._position.right !== null ) {
+        this._$element.style.left = 'auto';
+        this._$element.style.right = String(this._position.right) + 'px';
+      } else {
+        this._$element.style.left = String(this._position.left) + 'px';
+        this._$element.style.right = 'auto';
+      }
+
+      if ( this._position.bottom !== null ) {
+        this._$element.style.top = 'auto';
+        this._$element.style.bottom = String(this._position.bottom) + 'px';
+      } else {
+        this._$element.style.top = String(this._position.top) + 'px';
+        this._$element.style.bottom = 'auto';
+      }
     }
   };
 
@@ -411,36 +439,87 @@
    * Updates the Widgets dimensions based on internal options
    */
   Widget.prototype._updateDimension = function() {
-    var o = this._options;
-    var w = Math.min(Math.max(o.width, o.minWidth), o.maxWidth);
-    var h = Math.min(Math.max(o.height, o.minHeight), o.maxHeight);
-
     if ( this._$element ) {
-      this._$element.style.width = String(w) + 'px';
-      this._$element.style.height = String(h) + 'px';
+      this._$element.style.width = String(this._dimension.width) + 'px';
+      this._$element.style.height = String(this._dimension.height) + 'px';
     }
 
     if ( this._$canvas ) {
-      this._$canvas.width = w;
-      this._$canvas.height = h;
+      this._$canvas.width = this._dimension.width;
+      this._$canvas.height = this._dimension.height;
     }
   };
 
   /**
    * Gets the position of the Widget
+   *
+   * @return {Object}
    */
   Widget.prototype._getNormalizedPosition = function() {
-    var left = this._options.left;
-    if ( this._options.right ) {
-      left = this._windowWidth - this._options.right - this._options.width;
+    var left = this._position.left;
+    if ( this._position.right ) {
+      left = this._windowWidth - this._position.right - this._dimension.width;
     }
 
-    var top = this._options.top;
-    if ( this._options.bottom ) {
-      top = this._windowHeight - this._options.bottom - this._options.height;
+    var top = this._position.top;
+    if ( this._position.bottom ) {
+      top = this._windowHeight - this._position.bottom - this._dimension.height;
     }
 
-    return {x: left, y: top};
+    return {left: left, top: top};
+  };
+
+  /**
+   * Gets the dimensions
+   *
+   * @return {Object}
+   */
+  Widget.prototype._getDimension = function() {
+    return {
+      width: this._dimension.width,
+      height: this._dimension.height
+    };
+  };
+
+  /**
+   * Gets the position
+   *
+   * @return {Object}
+   */
+  Widget.prototype._getPosition = function() {
+    return {
+      left: this._position.left,
+      top: this._position.top,
+      right: this._position.right,
+      bottom: this._position.bottom
+    };
+  };
+
+  /**
+   * Check if widget has passed the middle of screen in
+   * given direction
+   *
+   * @return {Boolean}
+   */
+  Widget.prototype._isPastHalf = function(dir, obj) {
+    obj = obj || this._position;
+
+    var hleft = this._windowWidth / 2;
+    var aleft = obj.left + (this._dimension.width / 2);
+    if ( dir === 'horizontal' ) {
+      return aleft >= hleft;
+    }
+
+    var htop = this._windowHeight / 2;
+    var atop = obj.top + (this._dimension.height / 2);
+    return atop >= htop;
+  };
+
+  /**
+   * When Widget is being moved
+   */
+  Widget.prototype.onMove = function() {
+    // Implement in your widget
   };
 
   /**

@@ -49,6 +49,8 @@
       resizable: true,
       viewBox: true
     }, settings);
+
+    this.radius = 300 / 2;
   }
 
   WidgetClock.prototype = Object.create(Widget.prototype);
@@ -67,48 +69,13 @@
       return;
     }
 
-    var canvas = this._$canvas;
     var ctx = this._$context;
-    var radius = canvas.height / 2;
-
-    // NOTE: This was just lifted from the webz
-    function drawFace(ctx, radius) {
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-      ctx.fillStyle = 'white';
-      ctx.fill();
-
-      ctx.lineWidth = radius * 0.04;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, 0, radius * 0.1, 0, 2 * Math.PI);
-      ctx.fillStyle = '#000';
-      ctx.fill();
-    }
-
-    function drawNumbers(ctx, radius) {
-      var ang;
-      var num;
-      ctx.font = radius * 0.15 + 'px arial';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'center';
-
-      for ( num = 1; num < 13; num++ ) {
-        ang = num * Math.PI / 6;
-        ctx.rotate(ang);
-        ctx.translate(0, -radius * 0.85);
-        ctx.rotate(-ang);
-        ctx.fillText(num.toString(), 0, 0);
-        ctx.rotate(ang);
-        ctx.translate(0, radius * 0.85);
-        ctx.rotate(-ang);
-      }
-    }
+    var radius = Math.round(this.radius * 0.95);
 
     function drawHand(ctx, pos, length, width) {
       ctx.beginPath();
-      ctx.lineWidth  =  width;
-      ctx.lineCap  =  'round';
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
       ctx.moveTo(0,0);
       ctx.rotate(pos);
       ctx.lineTo(0, -length);
@@ -116,35 +83,61 @@
       ctx.rotate(-pos);
     }
 
-    function drawTime(ctx, radius) {
-      var now = new Date();
-      var hour = now.getHours();
-      var minute = now.getMinutes();
-      var second = now.getSeconds();
+    // Clear
+    ctx.clearRect(0, 0, this.radius * 2, this.radius * 2);
 
-      hour = hour % 12;
-      hour = (hour * Math.PI / 6) + (minute * Math.PI / (6 * 60)) + (second * Math.PI / (360 * 60));
-      minute = (minute * Math.PI / 30) + (second * Math.PI / (30 * 60));
-      second = (second * Math.PI / 30);
+    // Draw face
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = 'white';
+    ctx.fill();
 
-      drawHand(ctx, hour, radius * 0.5, radius * 0.07);
-      drawHand(ctx, minute, radius * 0.8, radius * 0.07);
-      drawHand(ctx, second, radius * 0.9, radius * 0.02);
+    ctx.lineWidth = radius * 0.04;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.1, 0, 2 * Math.PI);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+
+    // Draw numbers
+    ctx.font = radius * 0.15 + 'px arial';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+
+    for ( var num = 1; num < 13; num++ ) {
+      var ang = num * Math.PI / 6;
+      ctx.rotate(ang);
+      ctx.translate(0, -radius * 0.85);
+      ctx.rotate(-ang);
+      ctx.fillText(num.toString(), 0, 0);
+      ctx.rotate(ang);
+      ctx.translate(0, radius * 0.85);
+      ctx.rotate(-ang);
     }
 
-    radius = (canvas.height / 2) * 0.9;
-    drawFace(ctx, radius);
-    drawNumbers(ctx, radius);
-    drawTime(ctx, radius);
+    // Draw time
+    var now = new Date();
+    var hour = now.getHours();
+    var minute = now.getMinutes();
+    var second = now.getSeconds();
+
+    hour = hour % 12;
+    hour = (hour * Math.PI / 6) + (minute * Math.PI / (6 * 60)) + (second * Math.PI / (360 * 60));
+    minute = (minute * Math.PI / 30) + (second * Math.PI / (30 * 60));
+    second = (second * Math.PI / 30);
+
+    drawHand(ctx, hour, radius * 0.5, radius * 0.07);
+    drawHand(ctx, minute, radius * 0.8, radius * 0.07);
+    drawHand(ctx, second, radius * 0.9, radius * 0.02);
   };
 
-  WidgetClock.prototype.onResize = function() {
-    if ( !this._$canvas ) {
+  WidgetClock.prototype.onResize = function(dimension) {
+    if ( !this._$canvas || !this._$context ) {
       return;
     }
 
-    var radius = Math.round(this._$canvas.height / 2);
-    this._$context.translate(radius, radius);
+    this.radius = dimension.height / 2;
+    this._$context.translate(this.radius, this.radius);
   };
 
   /////////////////////////////////////////////////////////////////////////////
